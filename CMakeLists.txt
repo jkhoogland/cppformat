@@ -95,14 +95,19 @@ if (BIICODE)
 endif ()
 
 add_library(cppformat ${FMT_SOURCES})
-if (BUILD_SHARED_LIBS AND UNIX AND NOT APPLE)
-  # Fix rpmlint warning:
-  # unused-direct-shlib-dependency /usr/lib/libformat.so.1.1.0 /lib/libm.so.6.
-  target_link_libraries(cppformat -Wl,--as-needed)
+if (BUILD_SHARED_LIBS)
+  if (UNIX AND NOT APPLE)
+    # Fix rpmlint warning:
+    # unused-direct-shlib-dependency /usr/lib/libformat.so.1.1.0 /lib/libm.so.6.
+    target_link_libraries(cppformat -Wl,--as-needed)
+  endif ()
+  set(FMT_EXTRA_COMPILE_FLAGS -DFMT_EXPORT)
 endif ()
+
 if (FMT_PEDANTIC AND
     (CMAKE_COMPILER_IS_GNUCXX OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang")))
-  set(FMT_EXTRA_COMPILE_FLAGS "-Wall -Wextra -Wshadow -pedantic")
+  set(FMT_EXTRA_COMPILE_FLAGS
+      "${FMT_EXTRA_COMPILE_FLAGS} -Wall -Wextra -Wshadow -pedantic")
 endif ()
 
 # If FMT_PEDANTIC is TRUE, then test compilation with both -std=c++11

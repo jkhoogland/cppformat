@@ -40,8 +40,8 @@ typedef long long          intmax_t;
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <algorithm>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <map>
@@ -62,6 +62,17 @@ typedef long long          intmax_t;
 
 #if FMT_SECURE_SCL
 # include <iterator>
+#endif
+
+#if !defined(FMT_HEADER_ONLY) && defined(_WIN32)
+# ifdef FMT_EXPORT
+#  define FMT_API __declspec(dllexport)
+# elif defined(FMT_SHARED)
+#  define FMT_API __declspec(dllimport)
+# endif
+#endif
+#ifndef FMT_API
+# define FMT_API
 #endif
 
 #ifdef _MSC_VER
@@ -282,7 +293,7 @@ class numeric_limits<fmt::internal::DummyInt> :
     // isinf macro > std::isinf > ::isinf > fmt::internal::isinf
     if (check(sizeof(isinf(x)) == sizeof(bool) ||
               sizeof(isinf(x)) == sizeof(int))) {
-      return !!isinf(x);
+      return isinf(x) != 0;
     }
     return !_finite(static_cast<double>(x));
   }
@@ -293,7 +304,7 @@ class numeric_limits<fmt::internal::DummyInt> :
     using namespace fmt::internal;
     if (check(sizeof(isnan(x)) == sizeof(bool) ||
               sizeof(isnan(x)) == sizeof(int))) {
-      return !!isnan(x);
+      return isnan(x) != 0;
     }
     return _isnan(static_cast<double>(x)) != 0;
   }
@@ -302,7 +313,7 @@ class numeric_limits<fmt::internal::DummyInt> :
   static bool isnegative(double x) {
     using namespace fmt::internal;
     if (check(sizeof(signbit(x)) == sizeof(int)))
-      return !!signbit(x);
+      return signbit(x) != 0;
     if (x < 0) return true;
     if (!isnotanumber(x)) return false;
     int dec = 0, sign = 0;
@@ -404,7 +415,7 @@ class BasicStringRef {
 
   // Lexicographically compare this string reference to other.
   int compare(BasicStringRef other) const {
-    std::size_t size = (std::min)(size_, other.size_);
+    std::size_t size = size_ < other.size_ ? size_ : other.size_;
     int result = std::char_traits<Char>::compare(data_, other.data_, size);
     if (result == 0)
       result = size_ == other.size_ ? 0 : (size_ < other.size_ ? -1 : 1);
@@ -585,7 +596,8 @@ void Buffer<T>::append(const U *begin, const U *end) {
   std::size_t new_size = size_ + (end - begin);
   if (new_size > capacity_)
     grow(new_size);
-  std::copy(begin, end, internal::make_ptr(ptr_, capacity_) + size_);
+  std::uninitialized_copy(begin, end,
+                          internal::make_ptr(ptr_, capacity_) + size_);
   size_ = new_size;
 }
 
@@ -621,8 +633,8 @@ class MemoryBuffer : private Allocator, public Buffer<T> {
     this->capacity_ = other.capacity_;
     if (other.ptr_ == other.data_) {
       this->ptr_ = data_;
-      std::copy(other.data_,
-                other.data_ + this->size_, make_ptr(data_, this->capacity_));
+      std::uninitialized_copy(other.data_, other.data_ + this->size_,
+                              make_ptr(data_, this->capacity_));
     } else {
       this->ptr_ = other.ptr_;
       // Set pointer to the inline array so that delete is not called
@@ -650,12 +662,13 @@ class MemoryBuffer : private Allocator, public Buffer<T> {
 
 template <typename T, std::size_t SIZE, typename Allocator>
 void MemoryBuffer<T, SIZE, Allocator>::grow(std::size_t size) {
-  std::size_t new_capacity =
-      (std::max)(size, this->capacity_ + this->capacity_ / 2);
+  std::size_t new_capacity = this->capacity_ + this->capacity_ / 2;
+  if (size > new_capacity)
+      new_capacity = size;
   T *new_ptr = this->allocate(new_capacity);
   // The following code doesn't throw, so the raw pointer above doesn't leak.
-  std::copy(this->ptr_,
-            this->ptr_ + this->size_, make_ptr(new_ptr, new_capacity));
+  std::uninitialized_copy(this->ptr_, this->ptr_ + this->size_,
+                          make_ptr(new_ptr, new_capacity));
   std::size_t old_capacity = this->capacity_;
   T *old_ptr = this->ptr_;
   this->capacity_ = new_capacity;
@@ -674,7 +687,7 @@ class FixedBuffer : public fmt::Buffer<Char> {
   FixedBuffer(Char *array, std::size_t size) : fmt::Buffer<Char>(array, size) {}
 
  protected:
-  void grow(std::size_t size);
+  FMT_API void grow(std::size_t size);
 };
 
 template <typename Char>
@@ -685,7 +698,7 @@ class BasicCharTraits {
 #else
   typedef Char *CharPtr;
 #endif
-  static Char cast(wchar_t value) { return static_cast<Char>(value); }
+  static Char cast(int value) { return static_cast<Char>(value); }
 };
 
 template <typename Char>
@@ -702,7 +715,7 @@ class CharTraits<char> : public BasicCharTraits<char> {
 
   // Formats a floating-point number.
   template <typename T>
-  static int format_float(char *buffer, std::size_t size,
+  FMT_API static int format_float(char *buffer, std::size_t size,
       const char *format, unsigned width, int precision, T value);
 };
 
@@ -713,7 +726,7 @@ class CharTraits<wchar_t> : public BasicCharTraits<wchar_t> {
   static wchar_t convert(wchar_t value) { return value; }
 
   template <typename T>
-  static int format_float(wchar_t *buffer, std::size_t size,
+  FMT_API static int format_float(wchar_t *buffer, std::size_t size,
       const wchar_t *format, unsigned width, int precision, T value);
 };
 
@@ -767,12 +780,12 @@ FMT_SPECIALIZE_MAKE_UNSIGNED(int, unsigned);
 FMT_SPECIALIZE_MAKE_UNSIGNED(long, unsigned long);
 FMT_SPECIALIZE_MAKE_UNSIGNED(LongLong, ULongLong);
 
-void report_unknown_type(char code, const char *type);
+FMT_API void report_unknown_type(char code, const char *type);
 
 // Static data is placed in this class template to allow header-only
 // configuration.
 template <typename T = void>
-struct BasicData {
+struct FMT_API BasicData {
   static const uint32_t POWERS_OF_10_32[];
   static const uint64_t POWERS_OF_10_64[];
   static const char DIGITS[];
@@ -861,7 +874,7 @@ class UTF8ToUTF16 {
   MemoryBuffer<wchar_t, INLINE_BUFFER_SIZE> buffer_;
 
  public:
-  explicit UTF8ToUTF16(StringRef s);
+  FMT_API explicit UTF8ToUTF16(StringRef s);
   operator WStringRef() const { return WStringRef(&buffer_[0], size()); }
   size_t size() const { return buffer_.size() - 1; }
   const wchar_t *c_str() const { return &buffer_[0]; }
@@ -876,7 +889,7 @@ class UTF16ToUTF8 {
 
  public:
   UTF16ToUTF8() {}
-  explicit UTF16ToUTF8(WStringRef s);
+  FMT_API explicit UTF16ToUTF8(WStringRef s);
   operator StringRef() const { return StringRef(&buffer_[0], size()); }
   size_t size() const { return buffer_.size() - 1; }
   const char *c_str() const { return &buffer_[0]; }
@@ -885,15 +898,15 @@ class UTF16ToUTF8 {
   // Performs conversion returning a system error code instead of
   // throwing exception on conversion error. This method may still throw
   // in case of memory allocation error.
-  int convert(WStringRef s);
+  FMT_API int convert(WStringRef s);
 };
 
-void format_windows_error(fmt::Writer &out, int error_code,
-                          fmt::StringRef message) FMT_NOEXCEPT;
+FMT_API void format_windows_error(fmt::Writer &out, int error_code,
+                                  fmt::StringRef message) FMT_NOEXCEPT;
 #endif
 
-void format_system_error(fmt::Writer &out, int error_code,
-                         fmt::StringRef message) FMT_NOEXCEPT;
+FMT_API void format_system_error(fmt::Writer &out, int error_code,
+                                 fmt::StringRef message) FMT_NOEXCEPT;
 
 // A formatting argument value.
 struct Value {
@@ -974,6 +987,7 @@ template <typename T>
 T &get();
 
 struct DummyStream : std::ostream {
+  DummyStream();  // Suppress a bogus warning in MSVC.
   // Hide all operator<< overloads from std::ostream.
   void operator<<(Null<>);
 };
@@ -1624,7 +1638,6 @@ inline StrFormatSpec<wchar_t> pad(
   return StrFormatSpec<wchar_t>(str, width, fill);
 }
 
-
 namespace internal {
 
 template <typename Char>
@@ -1636,7 +1649,7 @@ class ArgMap {
   MapType map_;
 
  public:
-  void init(const ArgList &args);
+  FMT_API void init(const ArgList &args);
 
   const internal::Arg* find(const fmt::BasicStringRef<Char> &name) const {
     typename MapType::const_iterator it = map_.find(name);
@@ -1704,13 +1717,14 @@ class ArgFormatterBase : public ArgVisitor<Impl, void> {
     if (spec_.width_ > CHAR_WIDTH) {
       out = writer_.grow_buffer(spec_.width_);
       if (spec_.align_ == ALIGN_RIGHT) {
-        std::fill_n(out, spec_.width_ - CHAR_WIDTH, fill);
+        std::uninitialized_fill_n(out, spec_.width_ - CHAR_WIDTH, fill);
         out += spec_.width_ - CHAR_WIDTH;
       } else if (spec_.align_ == ALIGN_CENTER) {
         out = writer_.fill_padding(out, spec_.width_,
                                    internal::check(CHAR_WIDTH), fill);
       } else {
-        std::fill_n(out + CHAR_WIDTH, spec_.width_ - CHAR_WIDTH, fill);
+        std::uninitialized_fill_n(out + CHAR_WIDTH,
+                                  spec_.width_ - CHAR_WIDTH, fill);
       }
     } else {
       out = writer_.grow_buffer(CHAR_WIDTH);
@@ -1765,7 +1779,7 @@ class FormatterBase {
   int next_arg_index_;
 
   // Returns the argument with specified index.
-  Arg do_get_arg(unsigned arg_index, const char *&error);
+  FMT_API Arg do_get_arg(unsigned arg_index, const char *&error);
 
  protected:
   const ArgList &args() const { return args_; }
@@ -1821,7 +1835,8 @@ class PrintfFormatter : private FormatterBase {
 
  public:
   explicit PrintfFormatter(const ArgList &args) : FormatterBase(args) {}
-  void format(BasicWriter<Char> &writer, BasicCStringRef<Char> format_str);
+  FMT_API void format(BasicWriter<Char> &writer,
+                      BasicCStringRef<Char> format_str);
 };
 }  // namespace internal
 
@@ -2219,7 +2234,7 @@ class BasicWriter {
       const EmptySpec &, const char *prefix, unsigned prefix_size) {
     unsigned size = prefix_size + num_digits;
     CharPtr p = grow_buffer(size);
-    std::copy(prefix, prefix + prefix_size, p);
+    std::uninitialized_copy(prefix, prefix + prefix_size, p);
     return p + size - 1;
   }
 
@@ -2442,17 +2457,17 @@ typename BasicWriter<Char>::CharPtr BasicWriter<Char>::write_str(
     out = grow_buffer(spec.width());
     Char fill = internal::CharTraits<Char>::cast(spec.fill());
     if (spec.align() == ALIGN_RIGHT) {
-      std::fill_n(out, spec.width() - size, fill);
+      std::uninitialized_fill_n(out, spec.width() - size, fill);
       out += spec.width() - size;
     } else if (spec.align() == ALIGN_CENTER) {
       out = fill_padding(out, spec.width(), size, fill);
     } else {
-      std::fill_n(out + size, spec.width() - size, fill);
+      std::uninitialized_fill_n(out + size, spec.width() - size, fill);
     }
   } else {
     out = grow_buffer(size);
   }
-  std::copy(s, s + size, out);
+  std::uninitialized_copy(s, s + size, out);
   return out;
 }
 
@@ -2486,10 +2501,11 @@ typename BasicWriter<Char>::CharPtr
   std::size_t padding = total_size - content_size;
   std::size_t left_padding = padding / 2;
   Char fill_char = internal::CharTraits<Char>::cast(fill);
-  std::fill_n(buffer, left_padding, fill_char);
+  std::uninitialized_fill_n(buffer, left_padding, fill_char);
   buffer += left_padding;
   CharPtr content = buffer;
-  std::fill_n(buffer + content_size, padding - left_padding, fill_char);
+  std::uninitialized_fill_n(buffer + content_size,
+                            padding - left_padding, fill_char);
   return content;
 }
 
@@ -2515,42 +2531,42 @@ typename BasicWriter<Char>::CharPtr
     unsigned fill_size = width - number_size;
     if (align != ALIGN_LEFT) {
       CharPtr p = grow_buffer(fill_size);
-      std::fill(p, p + fill_size, fill);
+      std::uninitialized_fill(p, p + fill_size, fill);
     }
     CharPtr result = prepare_int_buffer(
         num_digits, subspec, prefix, prefix_size);
     if (align == ALIGN_LEFT) {
       CharPtr p = grow_buffer(fill_size);
-      std::fill(p, p + fill_size, fill);
+      std::uninitialized_fill(p, p + fill_size, fill);
     }
     return result;
   }
   unsigned size = prefix_size + num_digits;
   if (width <= size) {
     CharPtr p = grow_buffer(size);
-    std::copy(prefix, prefix + prefix_size, p);
+    std::uninitialized_copy(prefix, prefix + prefix_size, p);
     return p + size - 1;
   }
   CharPtr p = grow_buffer(width);
   CharPtr end = p + width;
   if (align == ALIGN_LEFT) {
-    std::copy(prefix, prefix + prefix_size, p);
+    std::uninitialized_copy(prefix, prefix + prefix_size, p);
     p += size;
-    std::fill(p, end, fill);
+    std::uninitialized_fill(p, end, fill);
   } else if (align == ALIGN_CENTER) {
     p = fill_padding(p, width, size, fill);
-    std::copy(prefix, prefix + prefix_size, p);
+    std::uninitialized_copy(prefix, prefix + prefix_size, p);
     p += size;
   } else {
     if (align == ALIGN_NUMERIC) {
       if (prefix_size != 0) {
-        p = std::copy(prefix, prefix + prefix_size, p);
+        p = std::uninitialized_copy(prefix, prefix + prefix_size, p);
         size -= prefix_size;
       }
     } else {
-      std::copy(prefix, prefix + prefix_size, end - size);
+      std::uninitialized_copy(prefix, prefix + prefix_size, end - size);
     }
-    std::fill(p, end - size, fill);
+    std::uninitialized_fill(p, end - size, fill);
     p = end;
   }
   return p - 1;
@@ -2708,7 +2724,7 @@ void BasicWriter<Char>::write_double(
   std::size_t offset = buffer_.size();
   unsigned width = spec.width();
   if (sign) {
-    buffer_.reserve(buffer_.size() + (std::max)(width, 1u));
+    buffer_.reserve(buffer_.size() + (width > 1u ? width : 1u));
     if (width > 0)
       --width;
     ++offset;
@@ -2770,7 +2786,7 @@ void BasicWriter<Char>::write_double(
           spec.width() > static_cast<unsigned>(n)) {
         width = spec.width();
         CharPtr p = grow_buffer(width);
-        std::copy(p, p + n, p + (width - n) / 2);
+        std::memmove(get(p) + (width - n) / 2, get(p), n * sizeof(Char));
         fill_padding(p, spec.width(), n, fill);
         return;
       }
@@ -2925,14 +2941,15 @@ void format(BasicFormatter<Char> &f, const Char *&format_str, const T &value) {
 
 // Reports a system error without throwing an exception.
 // Can be used to report errors from destructors.
-void report_system_error(int error_code, StringRef message) FMT_NOEXCEPT;
+FMT_API void report_system_error(int error_code,
+                                 StringRef message) FMT_NOEXCEPT;
 
 #if FMT_USE_WINDOWS_H
 
 /** A Windows error. */
 class WindowsError : public SystemError {
  private:
-  void init(int error_code, CStringRef format_str, ArgList args);
+  FMT_API void init(int error_code, CStringRef format_str, ArgList args);
 
  public:
   /**
@@ -2971,7 +2988,8 @@ class WindowsError : public SystemError {
 
 // Reports a Windows error without throwing an exception.
 // Can be used to report errors from destructors.
-void report_windows_error(int error_code, StringRef message) FMT_NOEXCEPT;
+FMT_API void report_windows_error(int error_code,
+                                  StringRef message) FMT_NOEXCEPT;
 
 #endif
 
@@ -2983,7 +3001,7 @@ enum Color { BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE };
   Example:
     print_colored(fmt::RED, "Elapsed time: {0:.2f} seconds", 1.23);
  */
-void print_colored(Color c, CStringRef format, ArgList args);
+FMT_API void print_colored(Color c, CStringRef format, ArgList args);
 
 /**
   \rst
@@ -3015,7 +3033,7 @@ inline std::wstring format(WCStringRef format_str, ArgList args) {
     print(stderr, "Don't {}!", "panic");
   \endrst
  */
-void print(std::FILE *f, CStringRef format_str, ArgList args);
+FMT_API void print(std::FILE *f, CStringRef format_str, ArgList args);
 
 /**
   \rst
@@ -3026,7 +3044,7 @@ void print(std::FILE *f, CStringRef format_str, ArgList args);
     print("Elapsed time: {0:.2f} seconds", 1.23);
   \endrst
  */
-void print(CStringRef format_str, ArgList args);
+FMT_API void print(CStringRef format_str, ArgList args);
 
 template <typename Char>
 void printf(BasicWriter<Char> &w, BasicCStringRef<Char> format, ArgList args) {
@@ -3063,7 +3081,7 @@ inline std::wstring sprintf(WCStringRef format, ArgList args) {
     fmt::fprintf(stderr, "Don't %s!", "panic");
   \endrst
  */
-int fprintf(std::FILE *f, CStringRef format, ArgList args);
+FMT_API int fprintf(std::FILE *f, CStringRef format, ArgList args);
 
 /**
   \rst
@@ -3358,7 +3376,7 @@ FMT_VARIADIC(int, fprintf, std::FILE *, CStringRef)
     print(cerr, "Don't {}!", "panic");
   \endrst
  */
-void print(std::ostream &os, CStringRef format_str, ArgList args);
+FMT_API void print(std::ostream &os, CStringRef format_str, ArgList args);
 FMT_VARIADIC(void, print, std::ostream &, CStringRef)
 #endif
 
@@ -3383,7 +3401,9 @@ int parse_nonnegative_int(const Char *&s) {
     }
     value = new_value;
   } while ('0' <= *s && *s <= '9');
-  if (value > (std::numeric_limits<int>::max)())
+  // Convert to unsigned to prevent a warning.
+  unsigned max_int = (std::numeric_limits<int>::max)();
+  if (value > max_int)
     FMT_THROW(FormatError("number is too big"));
   return value;
 }
