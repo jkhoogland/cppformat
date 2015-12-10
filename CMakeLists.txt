@@ -106,7 +106,7 @@ if (BUILD_SHARED_LIBS)
     # unused-direct-shlib-dependency /usr/lib/libformat.so.1.1.0 /lib/libm.so.6.
     target_link_libraries(cppformat -Wl,--as-needed)
   endif ()
-  set(FMT_EXTRA_COMPILE_FLAGS -DFMT_EXPORT)
+  set(FMT_EXTRA_COMPILE_FLAGS "${FMT_EXTRA_COMPILE_FLAGS} -DFMT_EXPORT")
 endif ()
 
 if (FMT_PEDANTIC AND
