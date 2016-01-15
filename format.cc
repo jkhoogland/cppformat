@@ -616,7 +616,7 @@ void fmt::internal::ArgMap<Char>::init(const ArgList &args) {
         return;
       case internal::Arg::NAMED_ARG:
         named_arg = static_cast<const NamedArg*>(args.values_[i].pointer);
-        map_.insert(Pair(named_arg->name, *named_arg));
+        map_.push_back(Pair(named_arg->name, *named_arg));
         break;
       default:
         /*nothing*/;
@@ -628,7 +628,7 @@ void fmt::internal::ArgMap<Char>::init(const ArgList &args) {
     internal::Arg::Type arg_type = args.type(i);
     if (arg_type == internal::Arg::NAMED_ARG) {
       named_arg = static_cast<const NamedArg*>(args.args_[i].pointer);
-      map_.insert(Pair(named_arg->name, *named_arg));
+      map_.push_back(Pair(named_arg->name, *named_arg));
     }
   }
   for (unsigned i = ArgList::MAX_PACKED_ARGS;/*nothing*/; ++i) {
@@ -637,7 +637,7 @@ void fmt::internal::ArgMap<Char>::init(const ArgList &args) {
       return;
     case internal::Arg::NAMED_ARG:
       named_arg = static_cast<const NamedArg*>(args.args_[i].pointer);
-      map_.insert(Pair(named_arg->name, *named_arg));
+      map_.push_back(Pair(named_arg->name, *named_arg));
       break;
     default:
       /*nothing*/;
@@ -880,6 +880,13 @@ FMT_FUNC int fmt::fprintf(std::FILE *f, CStringRef format, ArgList args) {
   printf(w, format, args);
   std::size_t size = w.size();
   return std::fwrite(w.data(), 1, size, f) < size ? -1 : static_cast<int>(size);
+}
+
+FMT_FUNC int fmt::fprintf(std::ostream &os, CStringRef format, ArgList args) {
+  MemoryWriter w;
+  printf(w, format, args);
+  os.write(w.data(), w.size());
+  return static_cast<int>(w.size());
 }
 
 #ifndef FMT_HEADER_ONLY

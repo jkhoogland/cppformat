@@ -18,6 +18,7 @@ endfunction ()
 add_library(gmock STATIC
   ${FMT_GMOCK_DIR}/gmock-gtest-all.cc ${FMT_GMOCK_DIR}/gmock/gmock.h
   ${FMT_GMOCK_DIR}/gtest/gtest.h ${FMT_GMOCK_DIR}/gtest/gtest-spi.h)
+target_include_directories(gmock INTERFACE ${FMT_GMOCK_DIR})
 find_package(Threads)
 if (Threads_FOUND)
   target_link_libraries(gmock ${CMAKE_THREAD_LIBS_INIT})
@@ -36,7 +37,7 @@ check_cxx_source_compiles("
 check_cxx_source_compiles("
   #include <initializer_list>
   int main() {}" FMT_INITIALIZER_LIST)
-  
+
 if (NOT FMT_VARIADIC_TEMPLATES OR NOT FMT_INITIALIZER_LIST)
   add_definitions(-DGTEST_LANG_CXX11=0)
 endif ()
